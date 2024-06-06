@@ -53,13 +53,14 @@ import (
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
 var (
-	testEnv                 *envtest.Environment
-	dummyDog                watchdog.Watchdog
-	unhealthyNode, peerNode = &v1.Node{}, &v1.Node{}
-	cancelFunc              context.CancelFunc
-	k8sClient               *shared.K8sClientWrapper
-	fakeRecorder            *record.FakeRecorder
-	snrConfig               *selfnoderemediationv1alpha1.SelfNodeRemediationConfig
+	testEnv                    *envtest.Environment
+	dummyDog                   watchdog.Watchdog
+	unhealthyNode, peerNode    = &v1.Node{}, &v1.Node{}
+	cancelFunc                 context.CancelFunc
+	k8sClient                  *shared.K8sClientWrapper
+	fakeRecorder               *record.FakeRecorder
+	snrConfig                  *selfnoderemediationv1alpha1.SelfNodeRemediationConfig
+	apiConnectivityCheckConfig *apicheck.ApiConnectivityCheckConfig
 )
 
 var unhealthyNodeNamespacedName = client.ObjectKey{
@@ -152,14 +153,15 @@ var _ = BeforeSuite(func() {
 	Expect(err).ToNot(HaveOccurred())
 
 	rebooter := reboot.NewWatchdogRebooter(dummyDog, ctrl.Log.WithName("rebooter"))
-	apiConnectivityCheckConfig := &apicheck.ApiConnectivityCheckConfig{
-		Log:                ctrl.Log.WithName("api-check"),
-		MyNodeName:         shared.UnhealthyNodeName,
-		CheckInterval:      shared.ApiCheckInterval,
-		MaxErrorsThreshold: shared.MaxErrorThreshold,
-		Peers:              peers,
-		Rebooter:           rebooter,
-		Cfg:                cfg,
+	apiConnectivityCheckConfig = &apicheck.ApiConnectivityCheckConfig{
+		Log:                    ctrl.Log.WithName("api-check"),
+		MyNodeName:             shared.UnhealthyNodeName,
+		CheckInterval:          shared.ApiCheckInterval,
+		MaxErrorsThreshold:     shared.MaxErrorThreshold,
+		Peers:                  peers,
+		Rebooter:               rebooter,
+		Cfg:                    cfg,
+		MinPeersForRemediation: 1,
 	}
 	apiCheck := apicheck.New(apiConnectivityCheckConfig, nil)
 	err = k8sManager.Add(apiCheck)
@@ -202,6 +204,134 @@ var _ = BeforeSuite(func() {
 	}()
 
 })
+
+//var _ = BeforeEach(func() {
+//	//logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+//
+//	//testScheme := runtime.NewScheme()
+//	//
+//	//By("bootstrapping test environment")
+//	//testEnv = &envtest.Environment{
+//	//	CRDInstallOptions: envtest.CRDInstallOptions{
+//	//		Scheme: testScheme,
+//	//		Paths: []string{
+//	//			filepath.Join("../../..", "vendor", "github.com", "openshift", "api", "machine", "v1beta1"),
+//	//			filepath.Join("../../..", "config", "crd", "bases"),
+//	//		},
+//	//		ErrorIfPathMissing: true,
+//	//	},
+//	//}
+//	//
+//	//cfg, err := testEnv.Start()
+//	//Expect(err).NotTo(HaveOccurred())
+//	//Expect(cfg).NotTo(BeNil())
+//	//
+//	//Expect(scheme.AddToScheme(testScheme)).To(Succeed())
+//	//Expect(machinev1beta1.Install(testScheme)).To(Succeed())
+//	//Expect(selfnoderemediationv1alpha1.AddToScheme(testScheme)).To(Succeed())
+//	//
+//	////+kubebuilder:scaffold:scheme
+//
+//	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
+//		Scheme:             testScheme,
+//		MetricsBindAddress: "0",
+//	})
+//	Expect(err).ToNot(HaveOccurred())
+//
+//	k8sClient = &shared.K8sClientWrapper{
+//		Client:                  k8sManager.GetClient(),
+//		Reader:                  k8sManager.GetAPIReader(),
+//		SimulatedFailureMessage: "simulation of client error for delete when listing namespace",
+//	}
+//	Expect(k8sClient).ToNot(BeNil())
+//
+//	nsToCreate := &v1.Namespace{
+//		ObjectMeta: metav1.ObjectMeta{
+//			Name: shared.Namespace,
+//		},
+//	}
+//	Expect(k8sClient.Create(context.Background(), nsToCreate)).To(Succeed())
+//
+//	//mock deployment ns
+//	_ = os.Setenv("DEPLOYMENT_NAMESPACE", nsToCreate.Name)
+//	_ = os.Setenv("SELF_NODE_REMEDIATION_IMAGE", shared.DsDummyImageName)
+//
+//	dummyDog = watchdog.NewFake(true)
+//	err = k8sManager.Add(dummyDog)
+//	Expect(err).ToNot(HaveOccurred())
+//	err = (&controllers.SelfNodeRemediationConfigReconciler{
+//		Client:                   k8sManager.GetClient(),
+//		Log:                      ctrl.Log.WithName("controllers").WithName("self-node-remediation-config-controller"),
+//		InstallFileFolder:        "../../../install/",
+//		Scheme:                   testScheme,
+//		Namespace:                shared.Namespace,
+//		RebootDurationCalculator: shared.MockRebootDurationCalculator{},
+//	}).SetupWithManager(k8sManager)
+//
+//	// peers need their own node on start
+//	unhealthyNode = getNode(shared.UnhealthyNodeName)
+//	Expect(k8sClient.Create(context.Background(), unhealthyNode)).To(Succeed(), "failed to create unhealthy node")
+//
+//	peerNode = getNode(shared.PeerNodeName)
+//	Expect(k8sClient.Create(context.Background(), peerNode)).To(Succeed(), "failed to create peer node")
+//
+//	peerApiServerTimeout := 5 * time.Second
+//	peers := peers.New(shared.UnhealthyNodeName, shared.PeerUpdateInterval, k8sClient, ctrl.Log.WithName("peers"), peerApiServerTimeout)
+//	err = k8sManager.Add(peers)
+//	Expect(err).ToNot(HaveOccurred())
+//
+//	rebooter := reboot.NewWatchdogRebooter(dummyDog, ctrl.Log.WithName("rebooter"))
+//	apiConnectivityCheckConfig = &apicheck.ApiConnectivityCheckConfig{
+//		Log:                    ctrl.Log.WithName("api-check"),
+//		MyNodeName:             shared.UnhealthyNodeName,
+//		CheckInterval:          shared.ApiCheckInterval,
+//		MaxErrorsThreshold:     shared.MaxErrorThreshold,
+//		Peers:                  peers,
+//		Rebooter:               rebooter,
+//		Cfg:                    cfg,
+//		MinPeersForRemediation: 1,
+//	}
+//	apiCheck := apicheck.New(apiConnectivityCheckConfig, nil)
+//	err = k8sManager.Add(apiCheck)
+//	Expect(err).ToNot(HaveOccurred())
+//
+//	fakeRecorder = record.NewFakeRecorder(1000)
+//	// reconciler for unhealthy node
+//	err = (&controllers.SelfNodeRemediationReconciler{
+//		Client:                   k8sClient,
+//		Log:                      ctrl.Log.WithName("controllers").WithName("self-node-remediation-controller").WithName("unhealthy node"),
+//		Rebooter:                 rebooter,
+//		RebootDurationCalculator: nil,
+//		MyNodeName:               shared.UnhealthyNodeName,
+//		MyNamespace:              shared.Namespace,
+//		Recorder:                 fakeRecorder,
+//		IsAgent:                  true,
+//	}).SetupWithManager(k8sManager)
+//	Expect(err).ToNot(HaveOccurred())
+//
+//	// reconciler for manager running on peer node
+//	err = (&controllers.SelfNodeRemediationReconciler{
+//		Client:                   k8sClient,
+//		Log:                      ctrl.Log.WithName("controllers").WithName("self-node-remediation-controller").WithName("manager node"),
+//		MyNodeName:               shared.PeerNodeName,
+//		MyNamespace:              shared.Namespace,
+//		Rebooter:                 nil,
+//		RebootDurationCalculator: shared.MockRebootDurationCalculator{},
+//		Recorder:                 fakeRecorder,
+//		IsAgent:                  false,
+//	}).SetupWithManager(k8sManager)
+//	Expect(err).ToNot(HaveOccurred())
+//
+//	var ctx context.Context
+//	ctx, cancelFunc = context.WithCancel(ctrl.SetupSignalHandler())
+//
+//	go func() {
+//		defer GinkgoRecover()
+//		err = k8sManager.Start(ctx)
+//		//Expect(err).ToNot(HaveOccurred())
+//	}()
+//
+//})
 
 func getNode(name string) *v1.Node {
 	node := &v1.Node{}
