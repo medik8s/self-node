@@ -445,22 +445,88 @@ var _ = Describe("SNR Controller", func() {
 			remediationStrategy = v1alpha1.ResourceDeletionRemediationStrategy
 		})
 
-		It("Verify that watchdog is not receiving food after some time", func() {
-			lastFoodTime := dummyDog.LastFoodTime()
-			timeout := dummyDog.GetTimeout()
-			Eventually(func() bool {
-				newTime := dummyDog.LastFoodTime()
-				// ensure the timeout passed
-				timeoutPassed := time.Now().After(lastFoodTime.Add(3 * timeout))
-				// ensure wd wasn't feeded
-				missedFeed := newTime.Before(lastFoodTime.Add(timeout))
-				if timeoutPassed && missedFeed {
-					return true
-				}
-				lastFoodTime = newTime
-				return false
-			}, 10*shared.PeerUpdateInterval, timeout).Should(BeTrue())
+		AfterEach(func() {
+			By("Restore default settings")
+			apiConnectivityCheckConfig.MinPeersForRemediation = 1
+
+			// sleep so config can update
+			time.Sleep(time.Second * 2)
 		})
+
+		Context("no peer found, and using default setting for MinPeersForRemediation", func() {
+			BeforeEach(func() {
+				apiConnectivityCheckConfig.MinPeersForRemediation = 1
+				snrConfig.Spec.MinPeersForRemediation = 1
+			})
+
+			It("Does not receive peer communication and has MinPeersForRemediation set to 1 so no reboot "+
+				"will occur", func() {
+				lastFoodTime := dummyDog.LastFoodTime()
+				timeout := dummyDog.GetTimeout()
+				fmt.Printf("timeout: %s", timeout.String())
+				Eventually(func() bool {
+					fmt.Println("YYYY")
+					newTime := dummyDog.LastFoodTime()
+					fmt.Printf("newTime: %s\n", newTime.Format(time.StampMilli))
+					// ensure the timeout passed
+					timeoutPassed := time.Now().After(lastFoodTime.Add(3 * timeout))
+					// ensure wd wasn't feeded
+					fmt.Printf("missedFeed time: %s\n", lastFoodTime.Add(timeout).Format(time.StampMilli))
+					missedFeed := newTime.Before(lastFoodTime.Add(timeout))
+					if timeoutPassed && missedFeed {
+						fmt.Println("timeout passed and missed feed")
+						return true
+					}
+					lastFoodTime = newTime
+					fmt.Println("timeout didn't pass and/or didn't miss feed")
+					return false
+				}, 10*shared.PeerUpdateInterval, timeout).Should(BeTrue())
+			})
+		})
+
+		Context("no peer found and MinPeersForRemediation is configured to 0", func() {
+			JustBeforeEach(func() {
+				apiConnectivityCheckConfig.MinPeersForRemediation = 0
+
+				// sleep so config can update
+				time.Sleep(time.Second * 2)
+			})
+
+			It("Does not receive peer communication and since configured to need zero peers, initiates a reboot",
+				func() {
+					fmt.Println("test 0")
+					lastFoodTime := dummyDog.LastFoodTime()
+					fmt.Printf("original lastFoodTime: %s\n", lastFoodTime.Format(time.StampMilli))
+					timeout := dummyDog.GetTimeout()
+					fmt.Printf("timeout: %s\n", timeout.String())
+
+					Eventually(func() bool {
+						fmt.Println("test 1")
+						newTime := dummyDog.LastFoodTime()
+						fmt.Printf("newTime: %s\n", newTime.Format(time.StampMilli))
+						// ensure the timeout passed
+						n := time.Now()
+						fmt.Printf("now (%s) should be past 3x past lastFoodTime(%s) which is %s\n",
+							n.Format(time.StampMilli), lastFoodTime.Format(time.StampMilli), lastFoodTime.Add(3*timeout).Format(time.StampMilli))
+						//fmt.Printf("timeout: %s\n", lastFoodTime.Add(3*timeout).Format(time.StampMilli))
+						timeoutPassed := n.After(lastFoodTime.Add(3 * timeout))
+						// ensure wd wasn't feeded
+						fmt.Printf("missedFeed time: %s\n", lastFoodTime.Add(timeout).Format(time.StampMilli))
+						fmt.Printf("newTime (%s) should be before lastFoodTime+%s (%s)\n", newTime.Format(time.StampMilli), timeout.String(),
+							lastFoodTime.Add(timeout).Format(time.StampMilli))
+						missedFeed := newTime.Before(lastFoodTime.Add(timeout))
+						if timeoutPassed && missedFeed {
+							fmt.Println("returning true")
+							return true
+						}
+						lastFoodTime = newTime
+
+						fmt.Println("returning false")
+						return false
+					}, "15s", timeout).Should(BeTrue())
+				})
+		})
+
 	})
 
 	Context("Configuration is missing", func() {
